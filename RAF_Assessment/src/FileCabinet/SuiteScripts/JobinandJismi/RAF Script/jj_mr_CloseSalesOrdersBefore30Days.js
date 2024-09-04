@@ -22,6 +22,7 @@ define(['N/email', 'N/file', 'N/record', 'N/search', 'N/runtime'],
          * @returns {Array|Object|Search|ObjectRef|File|Query} The input data to use in the map/reduce process
          * @since 2015.2
          */
+        let csvContent = 'Internal Id, Document Number, Customer Name, Total Amount\n';
 
         const getInputData = (inputContext) => {
             try{
@@ -65,41 +66,8 @@ define(['N/email', 'N/file', 'N/record', 'N/search', 'N/runtime'],
          * @since 2015.2
          */
 
-        const map = (mapContext) => {
-            let searchResult = JSON.parse(mapContext.value);
-            let internalId = searchResult.id;
-            let documentNumber = searchResult.values.tranid;
-            let customerId = searchResult.values.entity;
-            let totalAmount = searchResult.values.total;
-            try{
-                let salesOrder = record.load({
-                    type: record.Type.SALES_ORDER,
-                    id: internalId
-                });
-                salesOrder.setValue({
-                    fieldId: 'status',
-                    value: 'SalesOrd:C'
-                });
-                
-                salesOrder.save({
-                    enableSourcing: true,
-                    ignoreMandatoryFields: false
-                });
-                
-                mapContext.write({
-                    key: internalId,
-                    value: {
-                        customer: customerId,
-                        amount: totalAmount,
-                        documentNumber: documentNumber
-                    }
-                });
-                
-            }catch(e){
-                log.error('Error closing sales order, ID: ' + internalId + ', Error: ', e.message);
-            }
-
-        }
+        // const map = (mapContext) => {
+        // }
 
         /**
          * Defines the function that is executed when the reduce entry point is triggered. This entry point is triggered
@@ -117,40 +85,42 @@ define(['N/email', 'N/file', 'N/record', 'N/search', 'N/runtime'],
          * @since 2015.2
          */
         const reduce = (reduceContext) => {
-            // let data = [];
-            // reduceContext.values.forEach(function(value) {
-            //     data.push(JSON.parse(value));
-            // });
-            let data = reduceContext.values.map(function(value){
-                return JSON.parse(value);
-            });
-            log.debug('Data:', data);
-
-            let csvContent = 'Document Number,Internal ID,Customer Name,Total Amount\n';
-            data.forEach(function(order) {
-                csvContent += order.documentNumber + ',' + order.internalId + ',' + order.customer + ',' + order.amount + '\n';
-            });
-
-            let fileObj = file.create({
-                name: 'Closed Sales Orders List.csv',
-                fileType: file.Type.CSV,
-                contents: csvContent,
-                folder: -15
-            });
-            let fileId = fileObj.save();
-            // let user = runtime.getCurrentUser();
-            // log.debug('Current User', user);
-            email.send({
-                author: -5,
-                recipients: -5,
-                subject: 'Sales Orders Closed',
-                body: 'Hi Administrator, \n This email is to inform you that sales orders with a status of "Pending Fulfillment" and that havethe Transaction Date on or before 30 days ago, have been close by a Map/Reduce script. The details of closed Sales Orders have been mentioned int the attached CSV file. Review and do the needful. \n\n Thank you.\n',
-                attachments: [file.load({
-                    id: fileId
-                })]
-            });
+            try{
+                let data = JSON.parse(reduceContext.values);
+                let internalId = data.id;
+                let documentNumber = data.values.tranid;
+                let customerId = data.values.entity;
+                let totalAmount = data.values.total;
+                csvContent += internalId + ',' + documentNumber + ',' + customerId.text + ',' + totalAmount + '\n';
+                let salesOrder = record.load({
+                    type: record.Type.SALES_ORDER,
+                    id: internalId
+                });
+                let lineCount = salesOrder.getLineCount({
+                    sublistId: 'item'
+                });
+                for(let i = 0; i < lineCount; i++){
+                    let isClosed = salesOrder.setSublistValue({sublistId:'item', fieldId:'isclosed', line: i, value: true});
+                }
+                let save = salesOrder.save();
+                // let salesOrder2 = record.load({
+                //     type: record.Type.SALES_ORDER,
+                //     id: internalId
+                // });
+                // let status = salesOrder.getValue({
+                //     fieldId: 'status'
+                // });
+                // if (status === 'SalesOrd:C'){
+                //     csvContent += internalId + ',' + documentNumber + ',' + customerId.text + ',' + totalAmount + '\n';
+                // }
+                reduceContext.write({
+                    value: csvContent
+                });queueMicrotaskq
+            }
+            catch(e){
+                log.debug('Error@reduce', e.stack + e.message);
+            }
         }
-
 
         /**
          * Defines the function that is executed when the summarize entry point is triggered. This entry point is triggered
@@ -171,10 +141,43 @@ define(['N/email', 'N/file', 'N/record', 'N/search', 'N/runtime'],
          * @param {Object} summaryContext.reduceSummary - Statistics about the reduce stage
          * @since 2015.2
          */
-        const summarize = (summaryContext) => {
 
+        const summarize = (summaryContext) => {
+            try{
+                // log.debug('CSV Content', csvContent);
+                let closed;
+                summaryContext.output.iterator().each(function(value){
+                    closed = JSON.parse(value)
+                    return true;
+                });
+                let csvContent = 'Document Number,Internal ID,Customer Name,Total Amount\n';
+                csvContent += closed.value;
+
+                let fileObj = file.create({
+                    name: 'Closed Sales Orders List.csv',
+                    fileType: file.Type.CSV,
+                    contents: csvContent,
+                    folder: -15
+                });
+                let fileId = fileObj.save();
+                if(fileId){
+                    log.debug('CSV Status', 'CSV file has been created and saved to the File Cabinet.');
+                }
+                email.send({
+                    author: -5,
+                    recipients: -5,
+                    subject: 'Sales Orders Closed',
+                    body: 'Hi Administrator, \n This email is to inform you that sales orders with a status of "Pending Fulfillment" and that havethe Transaction Date on or before 30 days ago, have been close by a Map/Reduce script. The details of closed Sales Orders have been mentioned int the attached CSV file. Review and do the needful. \n\n Thank you.\n',
+                    attachments: [file.load({
+                        id: fileId
+                    })]
+                });
+            }
+            catch(e){
+                log.debug('Error @ Summarize', e.stack + e);
+            }
         }
 
-        return {getInputData, map, reduce, summarize}
+        return {getInputData, reduce, summarize}
 
     });
