@@ -100,22 +100,14 @@ define(['N/email', 'N/file', 'N/record', 'N/search', 'N/runtime'],
                     sublistId: 'item'
                 });
                 for(let i = 0; i < lineCount; i++){
+                    // salesOrder.selectLine({sublistId: 'item', line: i});
                     let isClosed = salesOrder.setSublistValue({sublistId:'item', fieldId:'isclosed', line: i, value: true});
+                    // salesOrder.commitLine({sublistId: 'item'});
                 }
                 let save = salesOrder.save();
-                // let salesOrder2 = record.load({
-                //     type: record.Type.SALES_ORDER,
-                //     id: internalId
-                // });
-                // let status = salesOrder.getValue({
-                //     fieldId: 'status'
-                // });
-                // if (status === 'SalesOrd:C'){
-                //     csvContent += internalId + ',' + documentNumber + ',' + customerId.text + ',' + totalAmount + '\n';
-                // }
                 reduceContext.write({
                     value: csvContent
-                });queueMicrotaskq
+                });
             }
             catch(e){
                 log.debug('Error@reduce', e.stack + e.message);
